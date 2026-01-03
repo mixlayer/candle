@@ -21,6 +21,9 @@ exclude = [
 ]
 resolver = "2"
 
+[patch.crates-io]
+cudarc = { path = "../cudarc" }
+
 [workspace.package]
 version = "0.9.2-alpha.2"
 edition = "2021"
@@ -47,7 +50,20 @@ candle-transformers = { path = "./candle-transformers", version = "0.9.2-alpha.2
 candle-ug = { path = "./candle-ug", version = "0.9.2-alpha.2" }
 clap = { version = "4.2.4", features = ["derive"] }
 criterion = { version = "0.7.0", default-features = false }
-cudarc = { version = "0.18.1", features = [
+# cudarc = { version = "0.18.1", features = [
+#     "std",
+#     "cublas",
+#     "cublaslt",
+#     "curand",
+#     "driver",
+#     "nvrtc",
+#     "f16",
+#     "f8",
+#     "cuda-version-from-build-system",
+#     "dynamic-linking",
+# ], default-features = false }
+
+cudarc = { path = "../cudarc", features = [
     "std",
     "cublas",
     "cublaslt",
@@ -59,6 +75,7 @@ cudarc = { version = "0.18.1", features = [
     "cuda-version-from-build-system",
     "dynamic-linking",
 ], default-features = false }
+
 fancy-regex = "0.13.0"
 gemm = { version = "0.18.2", features = ["wasm-simd128-enable"] }
 hf-hub = "0.4.1"
@@ -67,7 +84,12 @@ half = { version = "2.5.0", features = [
     "use-intrinsics",
     "rand_distr",
 ] }
-float8 = { version = "0.5.0", features = ["num-traits", "rand_distr"] }
+float8 = { version = "0.5.0", features = [
+    "std",
+    "num-traits",
+    "rand_distr",
+], default-features = false }
+
 hound = "3.5.1"
 image = { version = "0.25.2", default-features = false, features = [
     "jpeg",

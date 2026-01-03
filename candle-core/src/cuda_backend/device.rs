@@ -5,6 +5,7 @@ pub use cudarc;
 use cudarc::driver::CudaFunction;
 use float8::F8E4M3;
 use half::{bf16, f16};
+use std::any::TypeId;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
 
@@ -47,6 +48,12 @@ impl std::fmt::Debug for CudaDevice {
         write!(f, "CudaDevice({:?})", self.id)
     }
 }
+
+use once_cell::sync::Lazy;
+
+static HTOD_CONTENT_CACHE: Lazy<
+    Mutex<HashMap<(TypeId, Vec<u8>), Arc<dyn std::any::Any + Send + Sync>>>,
+> = Lazy::new(|| Mutex::new(HashMap::new()));
 
 impl CudaDevice {
     #[allow(clippy::missing_safety_doc)]
@@ -107,11 +114,64 @@ impl CudaDevice {
         self.stream.memcpy_dtoh(src, dst).w()
     }
 
-    pub fn clone_htod<T: cudarc::driver::DeviceRepr, Src: cudarc::driver::HostSlice<T> + ?Sized>(
+    pub fn clone_htod_old<
+        T: cudarc::driver::DeviceRepr,
+        Src: cudarc::driver::HostSlice<T> + ?Sized,
+    >(
         &self,
         src: &Src,
     ) -> Result<cudarc::driver::CudaSlice<T>> {
         self.stream.clone_htod(src).w()
+    }
+
+    pub fn clone_htod<
+        'a,
+        T: cudarc::driver::DeviceRepr + 'static,
+        Src: cudarc::driver::HostSlice<T> + ?Sized,
+    >(
+        &self,
+        src: &Src,
+    ) -> Result<cudarc::driver::CudaSlice<T>> {
+        use std::mem::size_of;
+        use std::slice;
+
+        let len = src.len();
+        let bytes_len = len * size_of::<T>();
+
+        if bytes_len > (1024 * 1024) {
+            return self.clone_htod_old(src);
+        }
+
+        // Synchronize with the stream and copy host bytes into a Vec<u8> key.
+        // We do this so repeat calls with identical content can reuse a cached
+        // device buffer and avoid allocations during CUDA graph capture.
+        let (host_slice, guard) = unsafe { src.stream_synced_slice(&self.stream) };
+        let key_bytes: Vec<u8> =
+            unsafe { slice::from_raw_parts(host_slice.as_ptr() as *const u8, bytes_len).to_vec() };
+        let key = (TypeId::of::<T>(), key_bytes);
+
+        // Fast path: exact content already on device.
+        let mut cache = HTOD_CONTENT_CACHE.lock().unwrap();
+        if let Some(buf_any) = cache.get(&key) {
+            if let Ok(buf_t) = buf_any.clone().downcast::<cudarc::driver::CudaSlice<T>>() {
+                drop(guard);
+                return Ok((*buf_t).clone());
+            }
+        }
+
+        if self.stream.capture_status().w()?
+            == cudarc::driver::sys::CUstreamCaptureStatus::CU_STREAM_CAPTURE_STATUS_ACTIVE
+        {
+            panic!("can't clone_htod during capture");
+        }
+
+        // Miss: allocate, copy, and cache the typed buffer.
+        let mut buf_t = unsafe { self.stream.alloc::<T>(len).w()? };
+        self.stream.memcpy_htod(src, &mut buf_t).w()?;
+        println!("caching htod buffer for len bytes: {}", bytes_len);
+        cache.insert(key, Arc::new(buf_t.clone()));
+        drop(guard);
+        Ok(buf_t)
     }
 }
 
