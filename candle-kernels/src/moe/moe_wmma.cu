@@ -221,41 +221,45 @@ __global__ void moe_gemm_grouped_kernel(
 #define LAUNCH_MOE_WMMA(DTYPE, WMMA_M, WMMA_N, WARPS_N)\
     vllm_rs::moe_gemm_grouped_kernel<DTYPE, WMMA_M, WMMA_N, WARPS_N><<<grid, block, smem_bytes, stream>>>(\
         reinterpret_cast<const DTYPE*>(input),\
-        reinterpret_cast<const DTYPE*>(weights),\
+        reinterpret_cast<const DTYPE*>(weights_local),\
         sorted_token_ids,\
-        expert_offsets,\
+        expert_offsets_local,\
         topk_weights,\
         reinterpret_cast<DTYPE*>(output),\
-        num_experts, topk,\
+        num_experts_local, topk,\
         size_m, size_n, size_k \
     );\
 
 extern "C" void moe_gemm_wmma(
     const void* input,                // [size_m, size_k]
-    const void* weights,              // [num_experts, size_n, size_k]
+    const void* weights_local,              // [num_experts_local, size_n, size_k]
     const int32_t* sorted_token_ids,  // [size_m] (Device)
     const int32_t* expert_ids,   // [size_m * topk]
     const float* topk_weights,        // [size_m] (Device, can be nullptr)
     void* output,                     // [size_m, size_n]
-    int32_t* expert_counts, // prealloc [num_experts]
-    int32_t* expert_offsets, // prealloc [num_experts + 1]
-    int num_experts,
+    int32_t* expert_counts_global, // prealloc [num_experts]
+    int32_t* expert_offsets_global, // prealloc [num_experts + 1]
+    int num_experts_global,
     int topk,
     int size_m,
     int size_n,
     int size_k,
     int data_type,                    // 0 = half, 1 = bfloat16
     bool is_prefill,
+    int expert_start,          // start expert id for this rank
+    int num_experts_local,     // number of experts for this rank
     cudaStream_t stream
 ) {
     if (is_prefill) {
-        calculate_expert_offsets(expert_ids, size_m, expert_counts, expert_offsets, num_experts, stream);
+        calculate_expert_offsets(expert_ids, size_m, expert_counts_global, expert_offsets_global, num_experts_global, stream);
     } else {
-        calculate_expert_offsets_light(expert_ids, size_m, expert_counts, expert_offsets, num_experts, stream);
+        calculate_expert_offsets_light(expert_ids, size_m, expert_counts_global, expert_offsets_global, num_experts_global, stream);
     }
 
+    const int32_t* expert_offsets_local = expert_offsets_global + expert_start;
+
     int grid_n = CEILDIV(size_n, vllm_rs::N_BLK);
-    dim3 grid(num_experts, grid_n, 1);
+    dim3 grid(num_experts_local, grid_n, 1);
     dim3 block(vllm_rs::BLOCK_THREADS, 1, 1);
 
     // Shared memory: A_sh[M_BLK, K_BLK] + B_sh[N_BLK, K_BLK]

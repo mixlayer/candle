@@ -138,7 +138,7 @@ impl CudaDevice {
         let len = src.len();
         let bytes_len = len * size_of::<T>();
 
-        if bytes_len > (1024 * 1024) {
+        if bytes_len > (1024 * 8) {
             return self.clone_htod_old(src);
         }
 
@@ -168,7 +168,7 @@ impl CudaDevice {
         // Miss: allocate, copy, and cache the typed buffer.
         let mut buf_t = unsafe { self.stream.alloc::<T>(len).w()? };
         self.stream.memcpy_htod(src, &mut buf_t).w()?;
-        println!("caching htod buffer for len bytes: {}", bytes_len);
+        // println!("caching htod buffer for len bytes: {}", bytes_len);
         cache.insert(key, Arc::new(buf_t.clone()));
         drop(guard);
         Ok(buf_t)

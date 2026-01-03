@@ -4,20 +4,22 @@ extern "C" {
     // for unquntized models
     pub fn moe_gemm_wmma(
         input: *const c_void,         // device pointer [size_m, size_k]
-        weights: *const c_void,       // device pointer [num_experts, size_n, size_k]
+        weights_local: *const c_void, // device pointer [num_experts_local, size_n, size_k]
         sorted_token_ids: *const i32, // device pointer [size_m]
         expert_ids: *const i32,       // host array [size_m] (expert id per sorted token)
         topk_weights: *const f32,
-        output: *mut c_void,      // device pointer [size_m, size_n]
-        expert_counts: *mut i32,  // pre-allocated buffer [num_experts]
-        expert_offsets: *mut i32, // pre-allocated buffer [num_experts + 1]
-        num_experts: i32,
+        output: *mut c_void,             // device pointer [size_m, size_n]
+        expert_counts_global: *mut i32,  // pre-allocated buffer [num_experts]
+        expert_offsets_global: *mut i32, // pre-allocated buffer [num_experts + 1]
+        num_experts_global: i32,
         topk: i32,
         size_m: i32,
         size_n: i32,
         size_k: i32,
         dtype: i32, // 0=float16, 1=bf16 (for input/output)
         is_prefill: bool,
+        expert_start: i32,
+        num_experts_local: i32,
         stream: i64,
     );
 

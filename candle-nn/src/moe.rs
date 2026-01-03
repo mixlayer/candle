@@ -110,6 +110,8 @@ pub fn moe_gemm(
                 size_k as i32,
                 data_type as i32, // 0=float16, 1=bf16 (for input/output)
                 is_prefill,
+                0,
+                num_experts as i32,
                 stream as i64,
             );
         }
