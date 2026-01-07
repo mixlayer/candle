@@ -155,7 +155,9 @@ impl CudaDevice {
         if let Some(buf_any) = cache.get(&key) {
             if let Ok(buf_t) = buf_any.clone().downcast::<cudarc::driver::CudaSlice<T>>() {
                 drop(guard);
-                return Ok((*buf_t).clone());
+                unsafe {
+                    return Ok((*buf_t).leak_managed());
+                }
             }
         }
 
@@ -167,11 +169,13 @@ impl CudaDevice {
 
         // Miss: allocate, copy, and cache the typed buffer.
         let mut buf_t = unsafe { self.stream.alloc::<T>(len).w()? };
+        let buf_t_return = unsafe { buf_t.leak_managed() };
+
         self.stream.memcpy_htod(src, &mut buf_t).w()?;
         // println!("caching htod buffer for len bytes: {}", bytes_len);
-        cache.insert(key, Arc::new(buf_t.clone()));
+        cache.insert(key, Arc::new(buf_t));
         drop(guard);
-        Ok(buf_t)
+        Ok(buf_t_return)
     }
 }
 
