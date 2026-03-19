@@ -16,9 +16,11 @@ pub enum Id {
     Sort,
     Ternary,
     Unary,
+    Fp8Dequant,
+    Fp8Quantize,
 }
 
-pub const ALL_IDS: [Id; 11] = [
+pub const ALL_IDS: [Id; 13] = [
     Id::Affine,
     Id::Binary,
     Id::Cast,
@@ -30,6 +32,8 @@ pub const ALL_IDS: [Id; 11] = [
     Id::Sort,
     Id::Ternary,
     Id::Unary,
+    Id::Fp8Dequant,
+    Id::Fp8Quantize,
 ];
 
 pub struct Module {
@@ -72,6 +76,8 @@ mdl!(BINARY, Binary);
 mdl!(CAST, Cast);
 mdl!(CONV, Conv);
 mdl!(FILL, Fill);
+mdl!(FP8_DEQUANT, Fp8Dequant);
+mdl!(FP8_QUANTIZE, Fp8Quantize);
 mdl!(INDEXING, Indexing);
 mdl!(QUANTIZED, Quantized);
 mdl!(REDUCE, Reduce);

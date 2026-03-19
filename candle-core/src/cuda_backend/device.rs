@@ -2,7 +2,7 @@ use crate::backend::{BackendDevice, BackendStorage};
 use crate::{CpuStorage, CpuStorageRef, DType, Layout, Result, Shape};
 pub use candle_kernels as kernels;
 pub use cudarc;
-use cudarc::driver::CudaFunction;
+use cudarc::driver::{CudaFunction, DevicePtr};
 use float8::F8E4M3;
 use half::{bf16, f16};
 use std::collections::HashMap;
@@ -96,6 +96,10 @@ pub struct CudaDevice {
     custom_modules: Arc<std::sync::RwLock<HashMap<String, Arc<cudarc::driver::CudaModule>>>>,
     stream: Arc<cudarc::driver::CudaStream>,
     pub(crate) blas: Arc<cudarc::cublas::CudaBlas>,
+    pub(crate) blas_lt: Arc<cudarc::cublaslt::CudaBlasLT>,
+    pub(crate) fp8_workspace: Arc<cudarc::driver::CudaSlice<u8>>,
+    #[allow(dead_code)]
+    cublas_workspace: Arc<cudarc::driver::CudaSlice<u8>>,
     curand: Arc<Mutex<CudaRng>>,
     seed_value: Arc<RwLock<u64>>,
     capture_pool: Arc<CudaGraphCapturePool>,
@@ -313,6 +317,14 @@ impl CudaDevice {
     pub fn cublas_handle(&self) -> Arc<cudarc::cublas::CudaBlas> {
         self.blas.clone()
     }
+
+    pub fn cublaslt_handle(&self) -> &cudarc::cublaslt::CudaBlasLT {
+        &self.blas_lt
+    }
+
+    pub fn fp8_workspace(&self) -> &cudarc::driver::CudaSlice<u8> {
+        &self.fp8_workspace
+    }
 }
 
 impl CudaDevice {
@@ -320,6 +332,24 @@ impl CudaDevice {
         let context = cudarc::driver::CudaContext::new(ordinal).w()?;
         let stream = context.new_stream().w()?;
         let blas = cudarc::cublas::CudaBlas::new(stream.clone()).w()?;
+        let blas_lt = cudarc::cublaslt::CudaBlasLT::new(stream.clone()).w()?;
+        let fp8_workspace = unsafe { stream.alloc::<u8>(33_554_432).w()? };
+        let cublas_workspace = stream.alloc_zeros::<u8>(33_554_432).w()?;
+        {
+            let (ws_ptr, _guard) = cublas_workspace.device_ptr(&stream);
+            unsafe {
+                let status = cudarc::cublas::sys::cublasSetWorkspace_v2(
+                    *blas.handle(),
+                    ws_ptr as *mut std::ffi::c_void,
+                    33_554_432,
+                );
+                assert!(
+                    status == cudarc::cublas::sys::cublasStatus_t::CUBLAS_STATUS_SUCCESS,
+                    "cublasSetWorkspace_v2 failed: {:?}",
+                    status,
+                );
+            }
+        }
         let curand = cudarc::curand::CudaRng::new(299792458, stream.clone()).w()?;
         let module_store = ModuleStore {
             mdls: [const { None }; kernels::ALL_IDS.len()],
@@ -331,6 +361,9 @@ impl CudaDevice {
             context,
             stream,
             blas: Arc::new(blas),
+            blas_lt: Arc::new(blas_lt),
+            fp8_workspace: Arc::new(fp8_workspace),
+            cublas_workspace: Arc::new(cublas_workspace),
             curand: Arc::new(Mutex::new(CudaRng(curand))),
             modules: Arc::new(std::sync::RwLock::new(module_store)),
             custom_modules: Arc::new(std::sync::RwLock::new(HashMap::new())),
@@ -347,6 +380,24 @@ impl BackendDevice for CudaDevice {
         let context = cudarc::driver::CudaContext::new(ordinal).w()?;
         let stream = context.default_stream();
         let blas = cudarc::cublas::CudaBlas::new(stream.clone()).w()?;
+        let blas_lt = cudarc::cublaslt::CudaBlasLT::new(stream.clone()).w()?;
+        let fp8_workspace = unsafe { stream.alloc::<u8>(33_554_432).w()? };
+        let cublas_workspace = stream.alloc_zeros::<u8>(33_554_432).w()?;
+        {
+            let (ws_ptr, _guard) = cublas_workspace.device_ptr(&stream);
+            unsafe {
+                let status = cudarc::cublas::sys::cublasSetWorkspace_v2(
+                    *blas.handle(),
+                    ws_ptr as *mut std::ffi::c_void,
+                    33_554_432,
+                );
+                assert!(
+                    status == cudarc::cublas::sys::cublasStatus_t::CUBLAS_STATUS_SUCCESS,
+                    "cublasSetWorkspace_v2 failed: {:?}",
+                    status,
+                );
+            }
+        }
         let curand = cudarc::curand::CudaRng::new(299792458, stream.clone()).w()?;
         let module_store = ModuleStore {
             mdls: [const { None }; kernels::ALL_IDS.len()],
@@ -358,6 +409,9 @@ impl BackendDevice for CudaDevice {
             context,
             stream,
             blas: Arc::new(blas),
+            blas_lt: Arc::new(blas_lt),
+            fp8_workspace: Arc::new(fp8_workspace),
+            cublas_workspace: Arc::new(cublas_workspace),
             curand: Arc::new(Mutex::new(CudaRng(curand))),
             modules: Arc::new(std::sync::RwLock::new(module_store)),
             custom_modules: Arc::new(std::sync::RwLock::new(HashMap::new())),
