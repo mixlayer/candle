@@ -21,6 +21,7 @@ pub mod conv;
 pub mod cpu_flash_attention;
 pub mod embedding;
 pub mod encoding;
+pub mod fp8_linear;
 pub mod func;
 pub mod group_norm;
 pub mod init;
@@ -52,6 +53,7 @@ pub use init::Init;
 pub use layer_norm::{
     layer_norm, layer_norm_no_bias, rms_norm, LayerNorm, LayerNormConfig, RmsNorm,
 };
+pub use fp8_linear::{fp8_blockwise_dequant, fp8_dynamic_quantize, Fp8BlockSize, Fp8Linear};
 pub use linear::{linear, linear_b, linear_no_bias, Linear};
 pub use ops::Dropout;
 pub use optim::{AdamW, Optimizer, ParamsAdamW, SGD};

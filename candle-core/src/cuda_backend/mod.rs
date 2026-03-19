@@ -5,6 +5,7 @@ use crate::op::{BinaryOpT, CmpOp, ReduceOp, UnaryOpT};
 use crate::{builder_arg as barg, CpuStorage, DType, Layout, Result, WithDType};
 pub use candle_kernels as kernels;
 pub use cudarc;
+pub use float8;
 use cudarc::cublas::{Gemm, GemmConfig, StridedBatchedConfig};
 use cudarc::driver::{
     CudaSlice, DevicePtr, DeviceRepr, LaunchConfig, PushKernelArg, ValidAsZeroBits,
@@ -16,6 +17,7 @@ use std::sync::Arc;
 pub mod cudnn;
 mod device;
 mod error;
+pub mod fp8_gemm;
 mod utils;
 pub use device::{CudaDevice, DeviceId};
 pub use error::{CudaError, WrapErr};
