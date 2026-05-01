@@ -17,7 +17,6 @@ use std::sync::Arc;
 pub mod cudnn;
 mod device;
 mod error;
-pub mod fp8_gemm;
 mod utils;
 pub use device::{CudaDevice, DeviceId};
 pub use error::{CudaError, WrapErr};
