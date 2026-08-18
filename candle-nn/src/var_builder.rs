@@ -770,6 +770,33 @@ impl Default for Shard {
     }
 }
 
+fn tensor_from_safetensor_slice(
+    mut iterator: safetensors::slice::SliceIterator<'_>,
+    view_dtype: DType,
+    shape: &[usize],
+    dtype: DType,
+    dev: &Device,
+) -> Result<Tensor> {
+    let byte_len = iterator.remaining_byte_len();
+    let first = iterator
+        .next()
+        .ok_or_else(|| Error::Msg("safetensor slice produced no data".to_string()))?;
+
+    let tensor = match iterator.next() {
+        None => Tensor::from_raw_buffer(first, view_dtype, shape, dev)?,
+        Some(second) => {
+            let mut raw = Vec::with_capacity(byte_len);
+            raw.extend_from_slice(first);
+            raw.extend_from_slice(second);
+            for chunk in iterator {
+                raw.extend_from_slice(chunk);
+            }
+            Tensor::from_raw_buffer(&raw, view_dtype, shape, dev)?
+        }
+    };
+    tensor.to_dtype(dtype)
+}
+
 /// Get part of a tensor, typically used to do Tensor Parallelism sharding.
 ///
 /// If the tensor is of size (1024, 1024).
@@ -841,8 +868,7 @@ impl Backend for ShardedSafeTensors {
         shape[dim] = block_size;
 
         let view_dtype: DType = view_dtype.try_into()?;
-        let raw: Vec<u8> = iterator.into_iter().flatten().cloned().collect();
-        Tensor::from_raw_buffer(&raw, view_dtype, &shape, dev)?.to_dtype(dtype)
+        tensor_from_safetensor_slice(iterator, view_dtype, &shape, dtype, dev)
     }
 
     fn get_unchecked(&self, _name: &str, _dtype: DType, _dev: &Device) -> Result<Tensor> {
@@ -902,5 +928,66 @@ impl<'a, R: Renamer> Rename<'a, R> {
 impl Renamer for Box<dyn Fn(&str) -> String + Sync + Send> {
     fn rename(&self, v: &str) -> std::borrow::Cow<'_, str> {
         std::borrow::Cow::Owned(self(v))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::tensor_from_safetensor_slice;
+    use candle::{DType, Device};
+    use safetensors::{
+        slice::IndexOp,
+        tensor::{Dtype, TensorView},
+    };
+
+    fn f32_bytes(values: impl IntoIterator<Item = f32>) -> Vec<u8> {
+        values.into_iter().flat_map(f32::to_le_bytes).collect()
+    }
+
+    #[test]
+    fn sharded_safetensor_loads_contiguous_slice() -> candle::Result<()> {
+        let data = f32_bytes((0..24).map(|value| value as f32));
+        let view = TensorView::new(Dtype::F32, vec![4, 6], &data)?;
+        let iterator = view.slice(2..4).expect("valid contiguous slice");
+        assert_eq!(iterator.count(), 1);
+
+        let tensor = tensor_from_safetensor_slice(
+            view.slice(2..4).expect("valid contiguous slice"),
+            DType::F32,
+            &[2, 6],
+            DType::F32,
+            &Device::Cpu,
+        )?;
+
+        assert_eq!(
+            tensor.to_vec2::<f32>()?,
+            vec![
+                vec![12., 13., 14., 15., 16., 17.],
+                vec![18., 19., 20., 21., 22., 23.],
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn sharded_safetensor_loads_strided_slice() -> candle::Result<()> {
+        let data = f32_bytes((0..24).map(|value| value as f32));
+        let view = TensorView::new(Dtype::F32, vec![4, 6], &data)?;
+        let iterator = view.slice((.., 2..4)).expect("valid strided slice");
+        assert_eq!(iterator.count(), 4);
+
+        let tensor = tensor_from_safetensor_slice(
+            view.slice((.., 2..4)).expect("valid strided slice"),
+            DType::F32,
+            &[4, 2],
+            DType::F32,
+            &Device::Cpu,
+        )?;
+
+        assert_eq!(
+            tensor.to_vec2::<f32>()?,
+            vec![vec![2., 3.], vec![8., 9.], vec![14., 15.], vec![20., 21.]]
+        );
+        Ok(())
     }
 }
